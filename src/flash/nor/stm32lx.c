@@ -88,7 +88,10 @@
 
 /* Constants */
 #define FLASH_SECTOR_SIZE 4096
+#define EEPROM_SECTOR_SIZE 256
 #define FLASH_BANK0_ADDRESS 0x08000000
+
+#define EEPROM_BANK0_ADDRESS 0x08080000
 
 /* option bytes */
 #define OPTION_BYTES_ADDRESS 0x1FF80000
@@ -105,6 +108,7 @@ static int stm32lx_lock(struct flash_bank *bank);
 static int stm32lx_unlock(struct flash_bank *bank);
 static int stm32lx_mass_erase(struct flash_bank *bank);
 static int stm32lx_wait_until_bsy_clear_timeout(struct flash_bank *bank, int timeout);
+static int stm32lx_unlock_options_bytes(struct flash_bank *bank);
 
 struct stm32lx_rev {
 	uint16_t rev;
@@ -131,6 +135,7 @@ struct stm32lx_flash_bank {
 	uint32_t idcode;
 	uint32_t user_bank_size;
 	uint32_t flash_base;
+	uint32_t eeprom_base;
 
 	const struct stm32lx_part_info *part_info;
 };
@@ -370,6 +375,146 @@ COMMAND_HANDLER(stm32lx_handle_unlock_command)
 
 	return retval;
 }
+
+COMMAND_HANDLER(stm32lx_handle_reset_option_bytes_command)
+{
+
+	if (CMD_ARGC < 1)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	struct flash_bank *bank;
+	int retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
+	if (ERROR_OK != retval)
+		return retval;
+
+	struct target *target = bank->target;
+	struct stm32lx_flash_bank *stm32lx_info = NULL;
+	uint32_t reg32;
+
+	if (target->state != TARGET_HALTED) {
+		LOG_ERROR("Target not halted");
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+	stm32lx_info = bank->driver_priv;
+
+
+	retval = stm32lx_unlock_options_bytes(bank);
+	if (retval != ERROR_OK)
+		return retval;
+
+	/* Reset the Option Bytes to default */
+	retval = target_write_u32(target, OPTION_BYTES_ADDRESS, OPTION_BYTE_0_PR0);
+	if (retval != ERROR_OK)
+		return retval;
+	retval = target_write_u32(target, 0x1FF80004, 0xff870078);
+	if (retval != ERROR_OK)
+		return retval;
+	retval = target_write_u32(target, 0x1FF80008, 0xffff0000);
+	if (retval != ERROR_OK)
+		return retval;
+	retval = target_write_u32(target, 0x1FF8000C, 0xffff0000);
+	if (retval != ERROR_OK)
+		return retval;
+	retval = target_write_u32(target, 0x1FF80010, 0xffff0000);
+	if (retval != ERROR_OK)
+		return retval;
+	retval = target_write_u32(target, 0x1FF80014, 0xffff0000);
+	if (retval != ERROR_OK)
+		return retval;
+	retval = target_write_u32(target, 0x1FF80018, 0xffff0000);
+	if (retval != ERROR_OK)
+		return retval;
+	retval = target_write_u32(target, 0x1FF8001C, 0xffff0000);
+	if (retval != ERROR_OK)
+		return retval;
+	retval = target_write_u32(target, 0x1FF80080, 0xffff0000);
+	if (retval != ERROR_OK)
+		return retval;
+	retval = target_write_u32(target, 0x1FF80084, 0xffff0000);
+	if (retval != ERROR_OK)
+		return retval;
+
+
+	retval = stm32lx_wait_until_bsy_clear_timeout(bank, 30000);
+	if (retval != ERROR_OK)
+		return retval;
+
+	/* Lock option bytes again */
+
+	retval = target_read_u32(target, stm32lx_info->flash_base + FLASH_PECR, &reg32);
+	if (retval != ERROR_OK)
+		return retval;
+
+	retval = target_write_u32(target, stm32lx_info->flash_base + FLASH_PECR, reg32 | FLASH_PECR__OPTLOCK);
+	if (retval != ERROR_OK)
+		return retval;
+
+	if (retval == ERROR_OK) {
+		command_print(CMD_CTX, "stm32lx reset option bytes complete");
+	} else {
+		command_print(CMD_CTX, "stm32lx reset option bytes failed");
+	}
+
+	return retval;
+}
+
+
+COMMAND_HANDLER(stm32lx_handle_read_option_bytes_command)
+{
+
+	if (CMD_ARGC < 1)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	struct flash_bank *bank;
+	int retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
+	if (ERROR_OK != retval)
+		return retval;
+
+	struct target *target = bank->target;
+	uint32_t reg32;
+
+	if (target->state != TARGET_HALTED) {
+		LOG_ERROR("Target not halted");
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+	/* Read all option bytes and report */
+
+	target_read_u32(target, 0x1FF80000, &reg32);
+	LOG_INFO("0x1FF80000 = 0x%08" PRIx32 "", reg32);
+
+	target_read_u32(target, 0x1FF80004, &reg32);
+	LOG_INFO("0x1FF80004 = 0x%08" PRIx32 "", reg32);
+
+	target_read_u32(target, 0x1FF80008, &reg32);
+	LOG_INFO("0x1FF80008 = 0x%08" PRIx32 "", reg32);
+
+	target_read_u32(target, 0x1FF8000C, &reg32);
+	LOG_INFO("0x1FF8000C = 0x%08" PRIx32 "", reg32);
+
+	target_read_u32(target, 0x1FF80010, &reg32);
+	LOG_INFO("0x1FF80010 = 0x%08" PRIx32 "", reg32);
+
+	target_read_u32(target, 0x1FF80014, &reg32);
+	LOG_INFO("0x1FF80014 = 0x%08" PRIx32 "", reg32);
+
+	target_read_u32(target, 0x1FF80018, &reg32);
+	LOG_INFO("0x1FF80018 = 0x%08" PRIx32 "", reg32);
+
+	target_read_u32(target, 0x1FF8001C, &reg32);
+	LOG_INFO("0x1FF8001C = 0x%08" PRIx32 "", reg32);
+
+	target_read_u32(target, 0x1FF80080, &reg32);
+	LOG_INFO("0x1FF80080 = 0x%08" PRIx32 "", reg32);
+
+	target_read_u32(target, 0x1FF80084, &reg32);
+	LOG_INFO("0x1FF80084 = 0x%08" PRIx32 "", reg32);
+
+
+	return retval;
+}
+
 
 static int stm32lx_protect_check(struct flash_bank *bank)
 {
@@ -756,8 +901,10 @@ static int stm32lx_probe(struct flash_bank *bank)
 	struct stm32lx_flash_bank *stm32lx_info = bank->driver_priv;
 	int i;
 	uint16_t flash_size_in_kb;
+	uint16_t eeprom_size_in_kb = 16;
 	uint32_t device_id;
 	uint32_t base_address = FLASH_BANK0_ADDRESS;
+	uint32_t eeprom_base_address = EEPROM_BANK0_ADDRESS;
 	uint32_t second_bank_base;
 
 	stm32lx_info->probed = 0;
@@ -784,6 +931,7 @@ static int stm32lx_probe(struct flash_bank *bank)
 	}
 
 	stm32lx_info->flash_base = stm32lx_info->part_info->flash_base;
+	stm32lx_info->eeprom_base = EEPROM_BANK0_ADDRESS;
 
 	/* Get the flash size from target. */
 	retval = target_read_u16(target, stm32lx_info->part_info->fsize_base,
@@ -826,6 +974,8 @@ static int stm32lx_probe(struct flash_bank *bank)
 		} else if (bank->base == base_address) {
 			/* This is the first bank */
 			flash_size_in_kb = stm32lx_info->part_info->first_bank_size_kb;
+		} else if (bank->base == eeprom_base_address) {
+			base_address = eeprom_base_address;
 		} else {
 			LOG_WARNING("STM32L flash bank base address config is incorrect."
 				    " 0x%" PRIx32 " but should rather be 0x%" PRIx32 " or 0x%" PRIx32,
@@ -835,6 +985,8 @@ static int stm32lx_probe(struct flash_bank *bank)
 		LOG_INFO("STM32L flash has dual banks. Bank (%d) size is %dkb, base address is 0x%" PRIx32,
 				bank->bank_number, flash_size_in_kb, base_address);
 	} else {
+		if(bank->base == eeprom_base_address)
+			base_address = eeprom_base_address;
 		LOG_INFO("STM32L flash size is %dkb, base address is 0x%" PRIx32, flash_size_in_kb, base_address);
 	}
 
@@ -845,16 +997,25 @@ static int stm32lx_probe(struct flash_bank *bank)
 		LOG_INFO("ignoring flash probed value, using configured bank size: %dkbytes", flash_size_in_kb);
 	}
 
+	int num_sectors;
 	/* calculate numbers of sectors (4kB per sector) */
-	int num_sectors = (flash_size_in_kb * 1024) / FLASH_SECTOR_SIZE;
+	if (base_address == eeprom_base_address)
+		num_sectors = (eeprom_size_in_kb * 1024) / EEPROM_SECTOR_SIZE;
+	else
+		num_sectors = (flash_size_in_kb * 1024) / FLASH_SECTOR_SIZE;
 
 	if (bank->sectors) {
 		free(bank->sectors);
 		bank->sectors = NULL;
 	}
 
-	bank->size = flash_size_in_kb * 1024;
+	if (base_address == eeprom_base_address)
+		bank->size = eeprom_size_in_kb * 1024;
+	else
+		bank->size = flash_size_in_kb * 1024;
+
 	bank->base = base_address;
+
 	bank->num_sectors = num_sectors;
 	bank->sectors = malloc(sizeof(struct flash_sector) * num_sectors);
 	if (bank->sectors == NULL) {
@@ -862,13 +1023,22 @@ static int stm32lx_probe(struct flash_bank *bank)
 		return ERROR_FAIL;
 	}
 
-	for (i = 0; i < num_sectors; i++) {
-		bank->sectors[i].offset = i * FLASH_SECTOR_SIZE;
-		bank->sectors[i].size = FLASH_SECTOR_SIZE;
-		bank->sectors[i].is_erased = -1;
-		bank->sectors[i].is_protected = 1;
-	}
+	if (base_address == eeprom_base_address) {
+		for (i = 0; i < num_sectors; i++) {
+			bank->sectors[i].offset = i * EEPROM_SECTOR_SIZE;
+			bank->sectors[i].size = EEPROM_SECTOR_SIZE;
+			bank->sectors[i].is_erased = -1;
+			bank->sectors[i].is_protected = 1;
+		}
 
+	} else {
+		for (i = 0; i < num_sectors; i++) {
+			bank->sectors[i].offset = i * FLASH_SECTOR_SIZE;
+			bank->sectors[i].size = FLASH_SECTOR_SIZE;
+			bank->sectors[i].is_erased = -1;
+			bank->sectors[i].is_protected = 1;
+		}
+	}
 	stm32lx_info->probed = 1;
 
 	return ERROR_OK;
@@ -958,6 +1128,20 @@ static const struct command_registration stm32lx_command_handlers[] = {
 		.help = "stm32lx flash command group",
 		.usage = "",
 		.chain = stm32lx_exec_command_handlers,
+	},
+	{
+		.name = "reset_option_bytes",
+		.handler = stm32lx_handle_reset_option_bytes_command,
+		.mode = COMMAND_EXEC,
+		.usage = "bank_id",
+		.help = "Reset option bytes to their default values",
+	},
+	{
+		.name = "read_option_bytes",
+		.handler = stm32lx_handle_read_option_bytes_command,
+		.mode = COMMAND_EXEC,
+		.usage = "bank_id",
+		.help = "Reads option bytes and reports their values",
 	},
 	COMMAND_REGISTRATION_DONE
 };
@@ -1183,9 +1367,9 @@ static int stm32lx_unlock_options_bytes(struct flash_bank *bank)
 	uint32_t reg32;
 
 	/*
-	* Unlocking the options bytes is done by unlocking the PECR,
-	* then by writing the 2 FLASH_PEKEYR to the FLASH_OPTKEYR register
-	*/
+	 * Unlocking the options bytes is done by unlocking the PECR,
+	 * then by writing the 2 FLASH_PEKEYR to the FLASH_OPTKEYR register
+	 */
 
 	/* check flash is not already unlocked */
 	retval = target_read_u32(target, stm32lx_info->flash_base + FLASH_PECR, &reg32);
