@@ -827,8 +827,11 @@ static int stm32lx_write(struct flash_bank *bank, const uint8_t *buffer,
 	/* this should always pass this check here */
 	assert((offset % hp_nb) == 0);
 
-	/* calculate half pages */
-	halfpages_number = count / hp_nb;
+	if (bank->base == EEPROM_BANK0_ADDRESS)
+		halfpages_number = 0;
+	else
+		/* calculate half pages */
+		halfpages_number = count / hp_nb;
 
 	if (halfpages_number) {
 		retval = stm32lx_write_half_pages(bank, buffer + bytes_written, offset, hp_nb * halfpages_number);
