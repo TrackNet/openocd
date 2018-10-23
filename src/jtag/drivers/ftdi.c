@@ -439,11 +439,11 @@ static void ftdi_execute_scan(struct jtag_command *cmd)
 	while (cmd->cmd.scan->num_fields > 0
 			&& cmd->cmd.scan->fields[cmd->cmd.scan->num_fields - 1].num_bits == 0) {
 		cmd->cmd.scan->num_fields--;
-		LOG_DEBUG("discarding trailing empty field");
+		DEBUG_JTAG_IO("discarding trailing empty field");
 	}
 
 	if (cmd->cmd.scan->num_fields == 0) {
-		LOG_DEBUG("empty scan, doing nothing");
+		DEBUG_JTAG_IO("empty scan, doing nothing");
 		return;
 	}
 
@@ -693,6 +693,18 @@ static int ftdi_initialize(void)
 static int ftdi_quit(void)
 {
 	mpsse_close(mpsse_ctx);
+
+	struct signal *sig = signals;
+	while (sig) {
+		struct signal *next = sig->next;
+		free((void *)sig->name);
+		free(sig);
+		sig = next;
+	}
+
+	free(ftdi_device_desc);
+	free(ftdi_serial);
+	free(ftdi_location);
 
 	free(swd_cmd_queue);
 
@@ -1064,8 +1076,19 @@ static int ftdi_swd_init(void)
 static void ftdi_swd_swdio_en(bool enable)
 {
 	struct signal *oe = find_signal_by_name("SWDIO_OE");
-	if (oe)
-		ftdi_set_signal(oe, enable ? '1' : '0');
+	if (oe) {
+		if (oe->data_mask)
+			ftdi_set_signal(oe, enable ? '1' : '0');
+		else {
+			/* Sets TDI/DO pin (pin 2) to input during rx when both pins are connected
+			   to SWDIO */
+			if (enable)
+				direction |= jtag_direction_init & 0x0002U;
+			else
+				direction &= ~0x0002U;
+			mpsse_set_data_bits_low_byte(mpsse_ctx, output & 0xff, direction & 0xff);
+		}
+	}
 }
 
 /**

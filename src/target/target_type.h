@@ -84,9 +84,18 @@ struct target_type {
 	 * "halt".
 	 *
 	 * reset run; halt
-     */
+	 */
 	int (*deassert_reset)(struct target *target);
 	int (*soft_reset_halt)(struct target *target);
+
+	/**
+	 * Target architecture for GDB.
+	 *
+	 * The string returned by this function will not be automatically freed;
+	 * if dynamic allocation is used for this value, it must be managed by
+	 * the target, ideally by caching the result for subsequent calls.
+	 */
+	const char *(*get_gdb_arch)(struct target *target);
 
 	/**
 	 * Target register access for GDB.  Do @b not call this function
@@ -130,8 +139,9 @@ struct target_type {
 
 	int (*checksum_memory)(struct target *target, target_addr_t address,
 			uint32_t count, uint32_t *checksum);
-	int (*blank_check_memory)(struct target *target, target_addr_t address,
-			uint32_t count, uint32_t *blank, uint8_t erased_value);
+	int (*blank_check_memory)(struct target *target,
+			struct target_memory_check_block *blocks, int num_blocks,
+			uint8_t erased_value);
 
 	/*
 	 * target break-/watchpoint control
