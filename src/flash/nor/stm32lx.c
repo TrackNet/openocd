@@ -1298,6 +1298,11 @@ static int stm32lx_erase_sector(struct flash_bank *bank, int sector)
 	int retval;
 	uint32_t reg32;
 
+        if (bank->base == EEPROM_BANK0_ADDRESS) {
+            LOG_INFO("skipping erase of EEPROM...");
+            return ERROR_OK;
+        }
+
 	/*
 	 * To erase a sector (i.e. stm32lx_info->part_info.pages_per_sector pages),
 	 * first unlock the memory, loop over the pages of this sector
